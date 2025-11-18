@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Sidor | פורטל לקוחות</title>
+    
+    <!-- 1. טעינת ספריות חיצוניות (React, Tailwind, Firebase, Icons) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/lucide-react/dist/lucide-react.min.js"></script>
+
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f3f4f6; overscroll-behavior: none; }
+        /* התאמות Tailwind */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- 2. הלוגיקה (React + Firebase) -->
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+        const { createRoot } = ReactDOM;
+        
+        // --- ייבוא פונקציות Firebase (Modular SDK via CDN) ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+        import { getFirestore, collection, doc, onSnapshot, query, orderBy, where, getDoc, addDoc, serverTimestamp, limit } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-storage.js";
+
+        // --- הגדרות Firebase ---
+        const firebaseConfig = {
+          apiKey: "AIzaSyDq0oVwS6zbEfsgrYBRkeBq80dDUKMedzo", 
+          authDomain: "saban94-78949.firebaseapp.com", 
+          projectId: "saban94-78949",
+          storageBucket: "saban94-78949.firebasestorage.app",
+          messagingSenderId: "41553157903", 
+          appId: "1:41553157903:web:cc33d252cff023be97a87a",
+          measurementId: "G-XV6RZDESSB"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const storage = getStorage(app);
+
+        // --- אייקונים (Lucide) ---
+        const Icon = ({ name, className }) => {
+            const LucideIcons = window.lucide.icons;
+            const IconComponent = LucideIcons[name];
+            if (!IconComponent) return null;
+            // המרה פשוטה ל-SVG string כי אנחנו ב-Browser React
+            return <i data-lucide={name.toLowerCase()} className={className}></i>;
+        };
+        
+        // --- קטלוג מוצרים (מוטמע) ---
+        const KnowledgeBase = {
+            products: [
+                { id: "p-101", sku: "10-101", name: "לוח גבס לבן", image: "https://placehold.co/100?text=Gevs", spec: "120x260", description: "לוח סטנדרטי לקירות." },
+                { id: "p-102", sku: "10-102", name: "ניצב 70", image: "https://placehold.co/100?text=Nitzav", spec: "300 סמ", description: "פרופיל אנכי." }
+            ],
+            search: function(term) {
+                if (term.length < 2) return [];
+                return this.products.filter(p => p.name.includes(term) || p.sku.includes(term));
+            }
+        };
+
+        // --- קומפוננטות ---
+
+        function LoadingScreen({ text }) {
+            return (
+                <div className="flex flex-col items-center justify-center h-screen bg-white">
+                    <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-gray-600 mt-4">{text}</p>
+                </div>
+            );
+        }
+
+        function LoginScreen() {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setLoading(true); setError('');
+                try { await signInWithEmailAndPassword(auth, email, password); } 
+                catch (err) { setError("פרטי התחברות שגויים."); }
+                setLoading(false);
+            };
+
+            return (
+                <div className="flex items-center justify-center min-h-screen bg-gray-100 p-4">
+                    <div className="w-full max-w-md bg-white p-8 rounded-2xl shadow-lg">
+                        <h2 className="text-2xl font-bold text-center text-blue-600 mb-6">Sidor Portal</h2>
+                        <form onSubmit={handleLogin} className="space-y-4">
+                            <input type="email" placeholder="אימייל" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-3 border rounded-lg" required />
+                            <input type="password" placeholder="סיסמה" value={password} onChange={e=>setPassword(e.target.value)} className="w-full p-3 border rounded-lg" required />
+                            {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+                            <button disabled={loading} className="w-full p-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700">{loading ? "מתחבר..." : "כניסה"}</button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        function ChatList({ profile, onSelect }) {
+            const [projects, setProjects] = useState(profile?.projects || []);
+            
+            return (
+                <div className="flex flex-col h-full">
+                    <header className="p-4 bg-white shadow-sm sticky top-0 z-10">
+                        <h1 className="text-2xl font-bold text-gray-800">הפרויקטים שלי</h1>
+                    </header>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                        {projects.length === 0 && <p className="text-center text-gray-500 mt-10">אין פרויקטים.</p>}
+                        {projects.map(p => (
+                            <div key={p.projectId} onClick={() => onSelect(p)} className="flex items-center p-4 bg-white rounded-xl shadow-sm cursor-pointer hover:bg-gray-50">
+                                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-lg">{p.name.charAt(0)}</div>
+                                <div className="mr-4 flex-1">
+                                    <h3 className="font-bold text-gray-800">{p.name}</h3>
+                                    <p className="text-sm text-gray-500">{p.address}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        function ChatRoom({ project, user, onBack }) {
+            const [messages, setMessages] = useState([]);
+            const [text, setText] = useState('');
+            const endRef = useRef(null);
+
+            useEffect(() => {
+                const q = query(collection(db, 'messages'), where('roomId', '==', project.projectId), orderBy('createdAt', 'asc'));
+                const unsub = onSnapshot(q, snap => {
+                    setMessages(snap.docs.map(d => ({id: d.id, ...d.data()})));
+                });
+                return () => unsub();
+            }, [project.projectId]);
+
+            useEffect(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages]);
+
+            const sendMessage = async () => {
+                if (!text.trim()) return;
+                await addDoc(collection(db, 'messages'), {
+                    roomId: project.projectId, senderId: user.uid, senderName: user.displayName || 'לקוח',
+                    text: text.trim(), type: 'TEXT', createdAt: serverTimestamp(), replyTo: null
+                });
+                setText('');
+            };
+
+            return (
+                <div className="flex flex-col h-full bg-[#e5ded8]">
+                    <header className="bg-[#008069] text-white p-3 flex items-center shadow-md">
+                        <button onClick={onBack} className="p-2"><i data-lucide="arrow-right"></i></button>
+                        <div className="mr-3 font-bold text-lg">{project.name}</div>
+                    </header>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                        {messages.map(m => (
+                            <div key={m.id} className={`flex ${m.senderId === user.uid ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[80%] p-2 rounded-lg shadow-sm text-sm ${m.senderId === user.uid ? 'bg-[#d9fdd3]' : 'bg-white'}`}>
+                                    <div>{m.text}</div>
+                                    <div className="text-[10px] text-gray-500 text-left mt-1">{m.createdAt ? new Date(m.createdAt.seconds * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '...'}</div>
+                                </div>
+                            </div>
+                        ))}
+                        <div ref={endRef} />
+                    </div>
+                    <div className="p-2 bg-[#f0f2f5] flex items-center">
+                        <input className="flex-1 mx-2 p-3 rounded-full border-none focus:ring-0" placeholder="הודעה" value={text} onChange={e=>setText(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} />
+                        <button onClick={sendMessage} className="p-3 bg-[#008069] text-white rounded-full"><i data-lucide="send"></i></button>
+                    </div>
+                </div>
+            );
+        }
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [profile, setProfile] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [activeProject, setActiveProject] = useState(null);
+            const [page, setPage] = useState('chats'); // chats, knowledge, profile
+
+            useEffect(() => {
+                const unsub = onAuthStateChanged(auth, async (u) => {
+                    if (u) {
+                        const docRef = doc(db, 'customers', u.uid);
+                        const snap = await getDoc(docRef);
+                        if (snap.exists()) {
+                            setUser(u);
+                            setProfile({uid: u.uid, ...snap.data()});
+                        } else {
+                            console.error("No profile");
+                            signOut(auth);
+                        }
+                    } else { setUser(null); setProfile(null); }
+                    setLoading(false);
+                });
+                return () => unsub();
+            }, []);
+            
+            useEffect(() => {
+                if(window.lucide) window.lucide.createIcons();
+            });
+
+            if (loading) return <LoadingScreen text="טוען..." />;
+            if (!user) return <LoginScreen />;
+
+            if (activeProject) return <ChatRoom project={activeProject} user={user} onBack={() => setActiveProject(null)} />;
+
+            return (
+                <div className="flex flex-col h-screen bg-gray-50">
+                    <div className="flex-1 overflow-hidden">
+                        {page === 'chats' && <ChatList profile={profile} onSelect={setActiveProject} />}
+                        {page === 'knowledge' && <div className="p-4 text-center">קטלוג בבנייה...</div>}
+                        {page === 'profile' && <div className="p-4 text-center"><h2 className="text-xl font-bold">{profile.name}</h2><button onClick={()=>signOut(auth)} className="text-red-500 mt-4">התנתק</button></div>}
+                    </div>
+                    <nav className="fixed bottom-0 w-full bg-white border-t flex justify-around p-3 pb-5 text-gray-500">
+                        <button onClick={()=>setPage('chats')} className={page==='chats'?'text-blue-600':''}><i data-lucide="message-square"></i><div class="text-xs">שיחות</div></button>
+                        <button onClick={()=>setPage('knowledge')} className={page==='knowledge'?'text-blue-600':''}><i data-lucide="book-open"></i><div class="text-xs">קטלוג</div></button>
+                        <button onClick={()=>setPage('profile')} className={page==='profile'?'text-blue-600':''}><i data-lucide="user"></i><div class="text-xs">פרופיל</div></button>
+                    </nav>
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
