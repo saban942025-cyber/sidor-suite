@@ -233,7 +233,7 @@
             const [profile, setProfile] = useState(null);
             const [loading, setLoading] = useState(true);
             const [activeProject, setActiveProject] = useState(null);
-            const [page, setPage] = useState('chats'); 
+            const [page, setPage] = useState('chats'); // chats, knowledge, profile
 
             useEffect(() => {
                 const unsub = onAuthStateChanged(auth, async (u) => {
